@@ -1,0 +1,366 @@
+﻿<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <title>GraphQL Testing in FsCheck</title>
+    <meta name="description" content="GraphQL Testing in FsCheck">
+    <meta name="author" content="Michał Niegrzybowski">
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <script src="//code.jquery.com/jquery-1.8.0.js"></script>
+    <script src="//code.jquery.com/ui/1.8.23/jquery-ui.js"></script>
+    <script src="//netdna.bootstrapcdn.com/twitter-bootstrap/2.2.1/js/bootstrap.min.js"></script>
+    <script type="text/javascript" src="//cdn.mathjax.org/mathjax/latest/MathJax.js?config=TeX-AMS-MML_HTMLorMML"></script>
+    <link href="//netdna.bootstrapcdn.com/twitter-bootstrap/2.2.1/css/bootstrap-combined.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="css/reveal.css">
+    <link rel="stylesheet" href="css/theme/blood.css" id="theme">
+    <link type="text/css" rel="stylesheet" href="fsharp.formatting/styles/style.css" />
+    <link type="text/css" rel="stylesheet" href="fsharp.formatting/styles/deedle.css" />
+    <link type="text/css" rel="stylesheet" href="css/custom.css" />
+    <script src="fsharp.formatting/styles/tips.js" type="text/javascript"></script>
+    <!-- For syntax highlighting -->
+    <link rel="stylesheet" href="lib/css/zenburn.css">
+    <link rel="stylesheet" href="css/fsreveal.css">
+    <!-- If the query includes 'print-pdf', include the PDF print sheet -->
+    <script>
+			if( window.location.search.match( /print-pdf/gi ) ) {
+				var link = document.createElement( 'link' );
+				link.rel = 'stylesheet';
+				link.type = 'text/css';
+				link.href = 'css/print/pdf.css';
+				document.getElementsByTagName( 'head' )[0].appendChild( link );
+			}
+    </script>
+    <!--[if lt IE 9]>
+    <script src="lib/js/html5shiv.js"></script>
+    <![endif]-->
+    <script language="javascript" type="text/javascript">
+        function init()
+        {
+            websocket = new WebSocket("ws://"+window.location.host+"/websocket");
+            websocket.onmessage = function(evt) { location.reload(); };
+        }
+        window.addEventListener("load", init, false);
+    </script>
+</head>
+<body>
+    <div class="reveal">
+        
+        <!-- Any section element inside of this container is displayed as a slide -->
+        <div class="slides">
+            <section >
+<h1>GraphQL Testing</h1>
+</section>
+<section >
+<section >
+<h1>What is the problem?</h1>
+</section>
+<section >
+<h2>Problem</h2>
+<ul>
+<li>The first thing is how we could test GraphQL queries so they would be almost fully covered with tests and we are sure that current implementation would work in next weeks</li>
+<li>Then how to write those tests so they are reliable and we check existing implementation instead of checking implementation from the last month, so how they could be coherent with the implementation</li>
+<li>the last thing is how we could simulate user interaction with our application</li>
+</ul>
+</section>
+<section >
+<h2>How it was solved?</h2>
+<ul>
+<li>we wrote some tests based on static files included in files (only for some specific query).</li>
+<li>we didn't wrote tests at all.</li>
+</ul>
+</section>
+<section >
+<h2>What problems has this solution?</h2>
+<ul>
+<li>the major problem was a stability(?) and immutability of tests like that, we always check only this one specific scenario, what with others scenarios?</li>
+<li>what possibly gone wrong when someone add some additional fields to the implementation, those (in fact this) static tests would be fixed? Right now we could see that they are not coherent between each other. Static files don't include all fields from the implementation.</li>
+<li>In those static files we also expect some concrete result, so in fact we are based on data that is present in database, there could be some issues not related to change in the implementation when data changed and tests now would failed, because someone change value of some column from <code>true</code> to <code>false</code>.</li>
+<li>The last thing is, it is very hard to spot all problems in a pr (for example change implementation of a GraphType, but not changed an input to a static test)</li>
+</ul>
+</section>
+<section >
+<h2>How we can solve them?</h2>
+<ul>
+<li>the first thing and most important thing would be to write tests to new/added functionalities, so we would be 100% sure that they work after few weeks/months etc. Because we have to ensure that our product is reliable.</li>
+<li>we shouldn't based on concrete data, the minimum information which is reliable for us is that the request end with success (200 HTTP STATUS CODE) and there are not any errors in an errors section in a GraphQL response the last thing is that GET request and POST request should be coherent, so the responses shouldn't differ.</li>
+<li>we should still check if data is transform correctly, but we should do that on a unit test level instead of integration/acceptance tests level.</li>
+</ul>
+</section>
+</section>
+<section >
+<section >
+<h1>FsCheck for the rescue</h1>
+</section>
+<section >
+<h2>What is FsCheck</h2>
+<ul>
+<li>FsCheck is a port of Haslell's QuickCheck library written in F#. The main clue of it is to write property-based tests. FsCheck is integrated with various of .net test frameworks like XUnit, NUnit, Expecto etc.</li>
+</ul>
+<ul>
+<li>Library written in F# for property-based and random testing.</li>
+<li>Integrated with Xunit and Nunit.</li>
+<li>Port of Haskell's QuickCheck library.</li>
+</ul>
+</section>
+<section >
+<h2>Property-Based testing paradigm(?)</h2>
+<ul>
+<li>So as I said before FsCheck tests are rather not simple unit tests, but a property based tests, the best visualization of that would be simple group of tests which have to test an 'add' method. If we would write unit test for that we preasumbly wrote tests like:</li>
+<li>1 + 1 should equal 2</li>
+<li>
+2 + 3 should equal 5 etc.
+But as we may when we add two numbers the order of them doesn't matter. So in a property based tests we would rather test the behavior that <code>a + b</code> is equal to <code>b + a</code>. So we check if the order doesn't matter for us. In our case, we would test if all of the queries align with specific properties like (all should end with 200 status code, all shouldn't include any errors etc.)
+</li>
+<li>So as we could see the property-based technic is different than standard unit tests. We have to remember that Property-Based tests is not a silver bullet and it wouldn't resolved all problems that we have with standard tests, but it is the another technic which could help us deliver more stable and reliable product and save us time (and us we now, time is money).</li>
+</ul>
+</section>
+<section >
+<h2>Random testing?</h2>
+<ul>
+<li>random testing sentence is sometimes connected with FsCheck because FsCheck is basin on generated data, which is then passed as an input to a test, but we have to remember that those generators are mostly written by us, so we are the guy who control the <code>randomness</code> factor in a test.</li>
+</ul>
+</section>
+</section>
+<section >
+<section >
+<h1>FsCheck infrastructure</h1>
+</section>
+<section >
+<h2>Test</h2>
+<ul>
+<li>
+as said before FsCheck is integrated with all common test frameworks. So to use it along with NUnit we have to install an additional package named FsCheck.NUnit.
+All FsCheck tests should have a Property attribute, generator which they are using (if we want to use custom one, cause FsCheck is able to generate some random data for basic types like int, string etc.), number of tests etc.
+</li>
+<li>Test should end with a Property, which should matched for every input, this property could have some where statements for which it shouldn't be checked, label which should be included in an input, distribution of an input, combination of statements etc.</li>
+</ul>
+<table class="pre"><tr><td class="lines"><pre class="fssnip"><span class="l"> 1: </span>
+<span class="l"> 2: </span>
+<span class="l"> 3: </span>
+<span class="l"> 4: </span>
+<span class="l"> 5: </span>
+<span class="l"> 6: </span>
+<span class="l"> 7: </span>
+<span class="l"> 8: </span>
+<span class="l"> 9: </span>
+<span class="l">10: </span>
+</pre></td>
+<td class="snippet"><pre class="fssnip highlighted"><code lang="csharp">
+[FsCheck.NUnit.Property(Arbitrary <span class="o">=</span> <span class="k">new</span>[] { <span class="k">typeof</span>(TestArbitrary) }, MaxTest <span class="o">=</span> <span class="n">10</span>)]
+<span class="k">public</span> Property Post_Return<span class="n">200</span>(TestObject obj)
+{
+    <span class="k">var</span> response <span class="o">=</span> DoSomething(obj);
+
+    <span class="k">return</span> response.StatusCode.Equals(HttpStatusCode.OK)
+        .ToProperty()
+        .And(() <span class="o">=</span><span class="o">&gt;</span> response.Data.Errors.IsEmpty())
+        .Label($<span class="s">"`DoSomething` should return 200 status code and no error section, but return status code: {response.StatusCode} and errors: {response.Data.Errors}"</span>);
+}
+
+</code></pre></td></tr></table>
+</section>
+<section >
+<h2>Generator</h2>
+<ul>
+<li>Every test is preceded with an attribute with optional Arbitrary inside. Arbitrary in fact, is a recipe for an input data, how it should be generated, formatted, boxed etc. In arbitrary we write a <code>recipe</code> how to create a input data, and FsCheck from this recipe gets a single input for each test.</li>
+</ul>
+</section>
+<section >
+<h2>Shrinker</h2>
+<ul>
+<li>if some test fails for some input shrinker has a job of minimalizing the input to the minimum, so it could find the minimum input which causes an error.</li>
+</ul>
+</section>
+<section >
+<h2>Configuration</h2>
+<ul>
+<li>Thanks to the configuration we could say to FsCheck how many times we want to run some specific test(s), if we don't want to log information if test passed, description, maximum number of tests which could fail.</li>
+</ul>
+</section>
+<section >
+<h2>Problems with FsCheck</h2>
+<ul>
+<li>In a current version FsCheck has some problems with test methods defined as <code>async Task</code> because of some static context between tests in FsCheck library, this should be fixed in a version 3.0.</li>
+<li>Property-Based tests is a completly different paradigm/technic than standard unit tests, so it could be hard to get it at first.</li>
+<li>Some of the functions have interfaces from a FSharp which should be somehow translated to .net interfaces like FSharpList -&gt; IList etc. it could introduce some problems.</li>
+</ul>
+</section>
+</section>
+<section >
+<section >
+<h1>Real example</h1>
+</section>
+<section >
+<h2>Test</h2>
+<ul>
+<li>code</li>
+</ul>
+</section>
+<section >
+<h2>How input is generated?</h2>
+<ul>
+<li>code</li>
+</ul>
+</section>
+<section >
+<h2>How assertion looks like</h2>
+<table class="pre"><tr><td class="lines"><pre class="fssnip"><span class="l">1: </span>
+<span class="l">2: </span>
+<span class="l">3: </span>
+<span class="l">4: </span>
+<span class="l">5: </span>
+<span class="l">6: </span>
+<span class="l">7: </span>
+<span class="l">8: </span>
+<span class="l">9: </span>
+</pre></td>
+<td class="snippet"><pre class="fssnip highlighted"><code lang="csharp">
+[FsCheck.NUnit.Property(Arbitrary <span class="o">=</span> <span class="k">new</span>[] { <span class="k">typeof</span>(TestArbitrary) }, MaxTest <span class="o">=</span> <span class="n">10</span>)]
+<span class="k">public</span> Property Post_Return<span class="n">200</span>(TestObject obj)
+{
+    <span class="c">// act</span>
+
+    <span class="k">return</span> assertion
+        .ToProperty()
+        .Label($<span class="s">"some information"</span>);
+}
+
+</code></pre></td></tr></table>
+</section>
+<section >
+<h2>How shrinker works</h2>
+<p>For query which fails because model is not resolved correctly, the first input to the test looks like this:</p>
+<table class="pre"><tr><td class="lines"><pre class="fssnip"><span class="l"> 1: </span>
+<span class="l"> 2: </span>
+<span class="l"> 3: </span>
+<span class="l"> 4: </span>
+<span class="l"> 5: </span>
+<span class="l"> 6: </span>
+<span class="l"> 7: </span>
+<span class="l"> 8: </span>
+<span class="l"> 9: </span>
+<span class="l">10: </span>
+</pre></td>
+<td class="snippet"><pre class="fssnip highlighted"><code lang="javascript">car(name: <span class="s">"name of a car"</span>)
+{
+    name
+    model
+    engine {
+        indicator
+        power
+        displacement
+    }
+}
+</code></pre></td></tr></table>
+<p>Then shrinker in a couple of iterations generates inputs without some data, we could see it as "in every iteration remove a single property"</p>
+<p>So in a first iteration inputs would look like this:</p>
+<table class="pre"><tr><td class="lines"><pre class="fssnip"><span class="l"> 1: </span>
+<span class="l"> 2: </span>
+<span class="l"> 3: </span>
+<span class="l"> 4: </span>
+<span class="l"> 5: </span>
+<span class="l"> 6: </span>
+<span class="l"> 7: </span>
+<span class="l"> 8: </span>
+<span class="l"> 9: </span>
+<span class="l">10: </span>
+<span class="l">11: </span>
+<span class="l">12: </span>
+<span class="l">13: </span>
+<span class="l">14: </span>
+<span class="l">15: </span>
+<span class="l">16: </span>
+<span class="l">17: </span>
+<span class="l">18: </span>
+<span class="l">19: </span>
+<span class="l">20: </span>
+<span class="l">21: </span>
+<span class="l">22: </span>
+<span class="l">23: </span>
+<span class="l">24: </span>
+<span class="l">25: </span>
+</pre></td>
+<td class="snippet"><pre class="fssnip highlighted"><code lang="javascript">car(name: <span class="s">"name of a car"</span>)
+{
+    model
+    engine {
+        indicator
+        power
+        displacement
+    }
+}
+
+car(name: <span class="s">"name of a car"</span>)
+{
+    name
+    engine {
+        indicator
+        power
+        displacement
+    }
+}
+
+car(name: <span class="s">"name of a car"</span>)
+{
+    name
+    model
+}
+</code></pre></td></tr></table>
+<p>and in second iteration it would generate following inputs:</p>
+<table class="pre"><tr><td class="lines"><pre class="fssnip"><span class="l">1: </span>
+</pre></td>
+<td class="snippet"><pre class="fssnip highlighted"><code lang="javascript">car(name: <span class="s">"name of a car"</span>) { model }
+</code></pre></td></tr></table>
+</section>
+<section >
+<h2>How to spot problem when test fails?</h2>
+<ul>
+<li>When test fails we could see an error message and an input in an output window.</li>
+<li>When we have some specific data we could use a Replay value in a Property attribute to replay failing values.</li>
+</ul>
+</section>
+</section>
+<section >
+<h1>Thanks</h1>
+</section>
+
+
+        </div>
+    </div>
+    <script src="lib/js/head.min.js"></script>
+    <script src="js/reveal.js"></script>
+    <script>
+        // Add the nohighlight class and data-noescape attribute to code elements that have already been formatted by FSharp.Formatting
+        $('pre.highlighted code').addClass('nohighlight').attr('data-noescape', '');
+
+        // Full list of configuration options available here:
+        // https://github.com/hakimel/reveal.js#configuration
+        Reveal.initialize({
+            controls: true,
+            progress: true,
+            history: true,
+            center: true,
+
+            transition: 'default', // default/cube/page/concave/zoom/linear/fade/none
+
+            // Parallax scrolling
+            // parallaxBackgroundImage: 'https://s3.amazonaws.com/hakim-static/reveal-js/reveal-parallax-1.jpg',
+            // parallaxBackgroundSize: '2100px 900px',
+
+            // Optional libraries used to extend on reveal.js
+            dependencies: [
+                { src: 'lib/js/classList.js', condition: function () { return !document.body.classList; } },
+                { src: 'plugin/markdown/marked.js', condition: function () { return !!document.querySelector('[data-markdown]'); } },
+                { src: 'plugin/markdown/markdown.js', condition: function () { return !!document.querySelector('[data-markdown]'); } },
+                { src: 'plugin/highlight/highlight.js', async: true, callback: function () { hljs.initHighlightingOnLoad(); } },
+                { src: 'plugin/zoom-js/zoom.js', async: true, condition: function () { return !!document.body.classList; } },
+                { src: 'plugin/notes/notes.js', async: true, condition: function () { return !!document.body.classList; } }
+            ]
+        });
+
+    </script>
+</body>
+</html>
+
